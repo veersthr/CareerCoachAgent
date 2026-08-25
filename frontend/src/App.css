@@ -105,6 +105,68 @@
   overflow-x: auto;
 }
 
+.report-view h1 {
+  font-size: 24px;
+  margin-top: 0;
+}
+
+.report-view h2 {
+  font-size: 19px;
+  margin-top: 28px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 6px;
+}
+
+.report-view h3 {
+  font-size: 16px;
+  margin-top: 20px;
+  color: #333;
+}
+
+.report-view table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: 14px;
+}
+
+.report-view th,
+.report-view td {
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid #e5e5e5;
+}
+
+.report-view th {
+  background: #f5f5f7;
+  font-weight: 600;
+}
+
+.report-view tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.report-view a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.report-view a:hover {
+  text-decoration: underline;
+}
+
+.report-view blockquote {
+  border-left: 3px solid #f5c26b;
+  background: #fff8ec;
+  margin: 12px 0;
+  padding: 8px 14px;
+  color: #7a4a00;
+}
+
+.report-view ol {
+  padding-left: 20px;
+}
+
 .timeline-view__week {
   margin-bottom: 20px;
 }

@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote_plus
 
 from config import settings
 from schemas import AgentState
@@ -34,6 +35,33 @@ def _session_path(session_id: str) -> Optional[Path]:
 PHASE_ORDER = ("Foundation", "Intermediate", "Expert")
 PHASE_WEEK_LABEL = {"Foundation": "Weeks 1-2", "Intermediate": "Weeks 3-4", "Expert": "Weeks 5-6"}
 
+# Resource topics/URLs are never asked of the LLM (it would hallucinate dead links) — a
+# search-engine link is built deterministically from resource_type + topic instead, so
+# it's always valid even if it isn't a single canonical source.
+RESOURCE_TYPE_LABEL = {
+    "official_docs": "Official Docs",
+    "video_course": "Video Course",
+    "practice_platform": "Practice Platform",
+    "book_chapter": "Book Chapter",
+    "project_idea": "Project Idea",
+}
+
+
+def _escape_md_cell(text: str) -> str:
+    return str(text).replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _resource_link(resource_type: str, topic: str) -> str | None:
+    query = quote_plus(topic)
+    if resource_type == "video_course":
+        return f"https://www.youtube.com/results?search_query={query}"
+    if resource_type == "project_idea":
+        return None  # nothing to link to — it's a build-it-yourself prompt
+    if resource_type == "book_chapter":
+        return f"https://www.google.com/search?q={query}&tbm=bks"
+    # official_docs, practice_platform, and any future type
+    return f"https://www.google.com/search?q={query}"
+
 
 def _group_skills_by_phase(skills: list[dict]) -> dict[str, list[dict]]:
     grouped: dict[str, list[dict]] = {p: [] for p in PHASE_ORDER}
@@ -49,15 +77,20 @@ def _format_skills_section(skills: list[dict]) -> str:
     lines = ["## Skills by Phase", ""]
     for phase in PHASE_ORDER:
         lines.append(f"### {phase} ({PHASE_WEEK_LABEL[phase]})")
+        lines.append("")
         phase_skills = sorted(grouped[phase], key=lambda s: s.get("importance_score") or 0, reverse=True)
         if not phase_skills:
             lines.append("_(none)_")
+            lines.append("")
+            continue
+        lines.append("| Skill | Importance | Difficulty | Domain |")
+        lines.append("|---|---|---|---|")
         for s in phase_skills:
             importance = s.get("importance_score")
             importance_str = f"{importance:.0%}" if importance is not None else "n/a"
             lines.append(
-                f"- **{s['name']}** — importance: {importance_str}, "
-                f"difficulty: {s['difficulty']:.0%}, domain: {s['domain']}"
+                f"| {_escape_md_cell(s['name'])} | {importance_str} | "
+                f"{s['difficulty']:.0%} | {_escape_md_cell(s['domain'])} |"
             )
         lines.append("")
     return "\n".join(lines)
@@ -74,9 +107,15 @@ def _format_weekly_plan_section(weekly_plan: dict) -> str:
 
 
 def _format_resources_section(resources: list[dict]) -> str:
-    lines = ["## Learning Resources", "", "| Week | Skill | Type | Topic |", "|---|---|---|---|"]
+    lines = ["## Learning Resources", "", "| Week | Skill | Type | Topic | Link |", "|---|---|---|---|---|"]
     for r in sorted(resources, key=lambda r: r["week"]):
-        lines.append(f"| {r['week']} | {r['skill']} | {r['resource_type']} | {r['topic']} |")
+        type_label = RESOURCE_TYPE_LABEL.get(r["resource_type"], r["resource_type"])
+        link = _resource_link(r["resource_type"], r["topic"])
+        link_cell = f"[Search]({link})" if link else "_(n/a)_"
+        lines.append(
+            f"| {r['week']} | {_escape_md_cell(r['skill'])} | {type_label} | "
+            f"{_escape_md_cell(r['topic'])} | {link_cell} |"
+        )
     lines.append("")
     return "\n".join(lines)
 
