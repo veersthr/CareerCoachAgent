@@ -118,14 +118,16 @@ ALIAS_TO_CANONICAL: dict[str, str] = {
 }
 
 
-def embedding_text(skill: TaxonomySkill) -> str:
-    """Text used to build this skill's embedding: canonical name + aliases,
-    giving the embedding model more surface area to match loose JD phrasing."""
-    if not skill["aliases"]:
-        return skill["name"]
-    return f"{skill['name']} ({', '.join(skill['aliases'])})"
-
-
-def all_embedding_texts() -> list[tuple[str, str]]:
-    """Returns [(canonical_name, embedding_text), ...] for the whole taxonomy."""
-    return [(s["name"], embedding_text(s)) for s in SKILL_TAXONOMY]
+def all_name_variants() -> list[tuple[str, str]]:
+    """Returns [(canonical_name, surface_form), ...] with one row per
+    canonical name AND per alias — each surface form gets its own embedding
+    point rather than being diluted into one combined "name (aliases)"
+    string, so a bare JD mention of the canonical name itself (e.g. "Django")
+    still scores a near-exact match against its own embedding instead of
+    being pulled down by unrelated alias text sharing the same vector."""
+    pairs: list[tuple[str, str]] = []
+    for s in SKILL_TAXONOMY:
+        pairs.append((s["name"], s["name"]))
+        for alias in s["aliases"]:
+            pairs.append((s["name"], alias))
+    return pairs

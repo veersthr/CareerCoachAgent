@@ -176,7 +176,7 @@ def run_role_strategist(state: AgentState) -> dict:
         updated: Skill = dict(skill)  # type: ignore[assignment]
         if entry is not None:
             updated["importance_score"] = entry["importance_score"]
-            updated["phase"] = entry["phase"]
+            updated["phase"] = entry["phase"].value
         else:
             # LLM dropped/misspelled a skill name — default rather than fail the run
             unmatched += 1
