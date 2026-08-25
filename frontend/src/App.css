@@ -1,0 +1,138 @@
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.app__header h1 {
+  margin-bottom: 4px;
+}
+
+.app__header p {
+  color: #555;
+  margin-top: 0;
+}
+
+.jd-input {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.jd-input__mode-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.jd-input__mode-toggle button,
+.roadmap-tabs__nav button {
+  padding: 6px 14px;
+  border: 1px solid #d0d0d0;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.jd-input__mode-toggle button.active,
+.roadmap-tabs__nav button.active {
+  background: #1a1a1a;
+  color: #fff;
+  border-color: #1a1a1a;
+}
+
+.jd-input textarea,
+.jd-input input[type="file"] {
+  padding: 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.jd-input button[type="submit"] {
+  align-self: flex-start;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.jd-input button[type="submit"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.jd-input__error {
+  color: #c0392b;
+  margin: 0;
+}
+
+.app__result {
+  margin-top: 24px;
+}
+
+.app__session-id {
+  color: #777;
+  font-size: 13px;
+}
+
+.app__partial-warning {
+  background: #fff4e5;
+  border: 1px solid #f5c26b;
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: #7a4a00;
+}
+
+.roadmap-tabs__nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.roadmap-tabs__content {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  overflow-x: auto;
+}
+
+.timeline-view__week {
+  margin-bottom: 20px;
+}
+
+.timeline-view__phase {
+  color: #777;
+  font-weight: normal;
+  font-size: 14px;
+}
+
+.timeline-view__empty {
+  color: #999;
+  font-style: italic;
+}
+
+.timeline-view__resource {
+  color: #555;
+}
+
+.agent-logs {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+}
+
+.gantt-chart {
+  overflow-x: auto;
+}
+
+.gantt-chart__error {
+  color: #c0392b;
+}
