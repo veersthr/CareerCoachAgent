@@ -1,0 +1,13 @@
+python-dotenv==1.2.3
+pydantic==2.13.4
+tenacity==9.1.4
+requests==2.34.2
+
+# LLM providers — install only the one(s) matching your LLM_PROVIDER setting
+groq==1.6.0
+google-generativeai==0.8.3
+
+# Local embeddings + vector search
+sentence-transformers==3.3.1
+chromadb==0.5.23
+faiss-cpu==1.9.0
