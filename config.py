@@ -61,10 +61,10 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
     cache_dir: Path = field(default_factory=lambda: BASE_DIR / "data" / "cache")
     sqlite_path: str = field(
-        default_factory=lambda: os.getenv("SQLITE_PATH", str(BASE_DIR / "data" / "checkpoints.sqlite"))
+        default_factory=lambda: os.getenv("SQLITE_PATH") or str(BASE_DIR / "data" / "checkpoints.sqlite")
     )
     chroma_persist_dir: str = field(
-        default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR", str(BASE_DIR / "data" / "chroma"))
+        default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR") or str(BASE_DIR / "data" / "chroma")
     )
     outputs_dir: Path = field(default_factory=lambda: BASE_DIR / "outputs")
 
