@@ -1,10 +1,13 @@
 """Local embedding-based skill canonicalization.
 
 Builds a local vector index (Chroma or FAISS, per VECTOR_STORE) over
-taxonomy.py's ~60 canonical skills and matches raw JD skill strings against it
-via cosine similarity. Used by agent_extractor.py to canonicalize each
-extracted skill; anything below CANONICALIZATION_THRESHOLD falls back to the
-raw extracted string (see AgentExtractor's `canonical` flag on Skill).
+taxonomy.py's ~60 canonical skills — indexing each skill's name AND each of
+its aliases as its own embedding point (not one combined "name (aliases)"
+string; see taxonomy.all_name_variants for why) — and matches raw JD skill
+strings against it via cosine similarity. Used by agent_extractor.py to
+canonicalize each extracted skill; anything below CANONICALIZATION_THRESHOLD
+falls back to the raw extracted string (see AgentExtractor's `canonical`
+flag on Skill).
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from config import settings
-from taxonomy import all_embedding_texts
+from taxonomy import all_name_variants
 
 
 class EmbeddingError(Exception):
@@ -30,8 +33,20 @@ def _get_model():
     return SentenceTransformer(settings.embedding_model)
 
 
+def _best_per_canonical_name(matches: list[tuple[str, float]]) -> tuple[str, float] | None:
+    """Multiple index rows (name + aliases) map to the same canonical name;
+    collapse raw top-k matches down to the single best score per name."""
+    best: dict[str, float] = {}
+    for name, score in matches:
+        if score > best.get(name, -1.0):
+            best[name] = score
+    if not best:
+        return None
+    return max(best.items(), key=lambda kv: kv[1])
+
+
 class _FaissIndex:
-    def __init__(self, names: list[str], vectors) -> None:
+    def __init__(self, canonical_names: list[str], vectors) -> None:
         try:
             import faiss
         except ImportError as exc:
@@ -40,27 +55,29 @@ class _FaissIndex:
 
         self._faiss = faiss
         self._np = np
-        self._names = names
+        self._canonical_names = canonical_names  # index i -> canonical name (may repeat)
         vecs = np.array(vectors, dtype="float32")
         faiss.normalize_L2(vecs)
         self._index = faiss.IndexFlatIP(vecs.shape[1])
         self._index.add(vecs)
 
-    def query(self, vector, top_k: int = 1) -> list[tuple[str, float]]:
+    def best_match(self, vector, candidate_pool: int = 10) -> tuple[str, float] | None:
         vec = self._np.array([vector], dtype="float32")
         self._faiss.normalize_L2(vec)
-        scores, idxs = self._index.search(vec, top_k)
-        return [
-            (self._names[i], float(scores[0][rank]))
+        k = min(candidate_pool, self._index.ntotal)
+        scores, idxs = self._index.search(vec, k)
+        raw_matches = [
+            (self._canonical_names[i], float(scores[0][rank]))
             for rank, i in enumerate(idxs[0])
             if i != -1
         ]
+        return _best_per_canonical_name(raw_matches)
 
 
 class _ChromaIndex:
     COLLECTION_NAME = "skill_taxonomy"
 
-    def __init__(self, names: list[str], vectors) -> None:
+    def __init__(self, canonical_names: list[str], variant_texts: list[str], vectors) -> None:
         try:
             import chromadb
         except ImportError as exc:
@@ -70,35 +87,41 @@ class _ChromaIndex:
         self._collection = client.get_or_create_collection(
             self.COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
         )
-        if self._collection.count() != len(names):
-            # fresh collection, or taxonomy.py changed size since last persisted run
+        if self._collection.count() != len(canonical_names):
+            # fresh collection, or taxonomy.py's variant count changed since last persisted run
+            ids = [f"{name}::{i}" for i, name in enumerate(canonical_names)]
             self._collection.upsert(
-                ids=names,
+                ids=ids,
                 embeddings=[[float(x) for x in v] for v in vectors],
-                metadatas=[{"name": n} for n in names],
+                metadatas=[
+                    {"name": name, "surface_form": text}
+                    for name, text in zip(canonical_names, variant_texts)
+                ],
+                documents=variant_texts,
             )
 
-    def query(self, vector, top_k: int = 1) -> list[tuple[str, float]]:
+    def best_match(self, vector, candidate_pool: int = 10) -> tuple[str, float] | None:
         res = self._collection.query(
-            query_embeddings=[[float(x) for x in vector]], n_results=top_k
+            query_embeddings=[[float(x) for x in vector]], n_results=candidate_pool
         )
-        ids = res["ids"][0]
+        metadatas = res["metadatas"][0]
         distances = res["distances"][0]  # cosine distance = 1 - cosine similarity
-        return [(id_, 1.0 - dist) for id_, dist in zip(ids, distances)]
+        raw_matches = [(meta["name"], 1.0 - dist) for meta, dist in zip(metadatas, distances)]
+        return _best_per_canonical_name(raw_matches)
 
 
 @lru_cache(maxsize=1)
 def _get_index():
     model = _get_model()
-    names_texts = all_embedding_texts()
-    names = [n for n, _ in names_texts]
-    texts = [t for _, t in names_texts]
-    vectors = model.encode(texts, normalize_embeddings=False)
+    variant_pairs = all_name_variants()  # [(canonical_name, surface_form), ...]
+    canonical_names = [n for n, _ in variant_pairs]
+    surface_forms = [t for _, t in variant_pairs]
+    vectors = model.encode(surface_forms, normalize_embeddings=False)
 
     if settings.vector_store == "faiss":
-        return _FaissIndex(names, vectors)
+        return _FaissIndex(canonical_names, vectors)
     if settings.vector_store == "chroma":
-        return _ChromaIndex(names, vectors)
+        return _ChromaIndex(canonical_names, surface_forms, vectors)
     raise EmbeddingError(f"Unknown VECTOR_STORE '{settings.vector_store}'. Must be 'chroma' or 'faiss'.")
 
 
@@ -113,10 +136,10 @@ def canonicalize_skill(raw_name: str) -> tuple[str, bool]:
     model = _get_model()
     index = _get_index()
     vector = model.encode([raw_name], normalize_embeddings=False)[0]
-    matches = index.query(vector, top_k=1)
-    if not matches:
+    match = index.best_match(vector)
+    if match is None:
         return raw_name, False
-    best_name, best_score = matches[0]
+    best_name, best_score = match
     if best_score >= settings.canonicalization_threshold:
         return best_name, True
     return raw_name, False
@@ -131,9 +154,9 @@ def canonicalize_skills(raw_names: list[str]) -> list[tuple[str, bool]]:
     vectors = model.encode(raw_names, normalize_embeddings=False)
     results = []
     for raw_name, vector in zip(raw_names, vectors):
-        matches = index.query(vector, top_k=1)
-        if matches and matches[0][1] >= settings.canonicalization_threshold:
-            results.append((matches[0][0], True))
+        match = index.best_match(vector)
+        if match is not None and match[1] >= settings.canonicalization_threshold:
+            results.append((match[0], True))
         else:
             results.append((raw_name, False))
     return results
