@@ -52,15 +52,15 @@ def extract_text_from_pdf(source: Union[str, bytes]) -> str:
     of all pages, page breaks separated by a blank line.
     """
     try:
-        import fitz  # PyMuPDF
+        import pymupdf
     except ImportError as exc:
         raise PDFParseError("PyMuPDF is not installed. Run: pip install pymupdf") from exc
 
     try:
         if isinstance(source, (bytes, bytearray)):
-            doc = fitz.open(stream=bytes(source), filetype="pdf")
+            doc = pymupdf.open(stream=bytes(source), filetype="pdf")
         else:
-            doc = fitz.open(source)
+            doc = pymupdf.open(source)
     except Exception as exc:
         raise PDFParseError(f"Could not open PDF: {exc}") from exc
 
