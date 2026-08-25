@@ -74,12 +74,14 @@ class _ChromaIndex:
             # fresh collection, or taxonomy.py changed size since last persisted run
             self._collection.upsert(
                 ids=names,
-                embeddings=[list(v) for v in vectors],
+                embeddings=[[float(x) for x in v] for v in vectors],
                 metadatas=[{"name": n} for n in names],
             )
 
     def query(self, vector, top_k: int = 1) -> list[tuple[str, float]]:
-        res = self._collection.query(query_embeddings=[list(vector)], n_results=top_k)
+        res = self._collection.query(
+            query_embeddings=[[float(x) for x in vector]], n_results=top_k
+        )
         ids = res["ids"][0]
         distances = res["distances"][0]  # cosine distance = 1 - cosine similarity
         return [(id_, 1.0 - dist) for id_, dist in zip(ids, distances)]
