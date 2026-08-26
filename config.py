@@ -35,11 +35,7 @@ class Settings:
     llm_temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.2")))
     llm_max_retries: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_RETRIES", "3")))
 
-    # --- Embeddings / vector search ---
-    embedding_model: str = field(
-        default_factory=lambda: os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-    )
-    vector_store: str = field(default_factory=lambda: os.getenv("VECTOR_STORE", "chroma").lower())  # chroma|faiss
+    # --- Skill canonicalization (embeddings.py: exact alias + fuzzy match, no ML deps) ---
     canonicalization_threshold: float = field(
         default_factory=lambda: float(os.getenv("CANONICALIZATION_THRESHOLD", "0.75"))
     )
@@ -63,9 +59,6 @@ class Settings:
     sqlite_path: str = field(
         default_factory=lambda: os.getenv("SQLITE_PATH") or str(BASE_DIR / "data" / "checkpoints.sqlite")
     )
-    chroma_persist_dir: str = field(
-        default_factory=lambda: os.getenv("CHROMA_PERSIST_DIR") or str(BASE_DIR / "data" / "chroma")
-    )
     outputs_dir: Path = field(default_factory=lambda: BASE_DIR / "outputs")
 
     # --- API ---
@@ -82,7 +75,7 @@ class Settings:
     debug: bool = field(default_factory=lambda: _get_bool("DEBUG", False))
 
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.cache_dir, self.outputs_dir, Path(self.chroma_persist_dir)):
+        for d in (self.data_dir, self.cache_dir, self.outputs_dir):
             d.mkdir(parents=True, exist_ok=True)
 
 

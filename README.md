@@ -23,7 +23,7 @@ Extractor -> Role Strategist -> Scheduler -> Enabler -> Validator
 ```
 
 - **Extractor** — 1 LLM call to pull skills from the JD, canonicalized against a ~60-skill
-  taxonomy via local sentence-transformer embeddings (ChromaDB/FAISS).
+  taxonomy via exact alias + fuzzy string matching (no ML dependency — see `embeddings.py`).
 - **Role Strategist** — deterministic keyword-based role detection, 1 LLM call to score
   skill importance and bucket into Foundation/Intermediate/Expert, deterministic
   readiness-score formula.
@@ -99,29 +99,34 @@ Logs / Gantt tabs.
 
 ## Deploying (Vercel frontend + Render backend)
 
-The backend uses heavy local ML deps (`sentence-transformers`, `chromadb`, `faiss-cpu`),
-a local SQLite checkpoint file, and optionally the Tesseract binary — none of which fit
-Vercel's serverless model. Split the deploy instead: frontend on Vercel (static site),
-backend on Render (a real long-running container with a persistent disk).
+The backend needs a real long-running process (the pipeline can take a while, and
+Vercel's serverless functions aren't a fit) and optionally the Tesseract binary — so
+it's split: frontend on Vercel (static site), backend on Render (Docker web service).
 
 ### Backend on Render
 
 1. Push this repo to GitHub (already done if you're reading this from the repo).
 2. In the Render dashboard: **New > Blueprint**, point it at this repo. Render reads
-   [`render.yaml`](render.yaml) and creates a Docker-based web service that installs
-   Tesseract, mounts a 1GB persistent disk at `/app/data` (so the Chroma index and
-   SQLite checkpoints survive restarts), and health-checks `/health`.
+   [`render.yaml`](render.yaml) and creates a Docker-based web service (installs
+   Tesseract, health-checks `/health`) on the **free** plan — skill canonicalization
+   is stdlib-only (see Notes below), so there's no heavy ML dependency forcing a paid
+   tier.
    - Alternatively, without the blueprint: **New > Web Service**, runtime **Docker**,
      it'll pick up the repo's [`Dockerfile`](Dockerfile) automatically.
 3. Set the env vars Render prompts for (marked `sync: false` in `render.yaml`):
-   - `GROQ_API_KEY` (or switch `LLM_PROVIDER`/keys to Gemini instead)
+   - `GROQ_API_KEY` — Groq's free tier is enough (or switch `LLM_PROVIDER`/keys to
+     Gemini instead)
    - `ALLOWED_ORIGINS` — leave blank until you have the Vercel URL from the next step,
      then come back and set it to `https://<your-vercel-app>.vercel.app` (comma-separate
      multiple origins if needed) and redeploy.
-4. Pick at least the **Standard** plan (or similar ≥2GB RAM) — `sentence-transformers`
-   + `chromadb` won't run reliably on a 512MB free instance.
-5. Once live, confirm `https://<your-render-app>.onrender.com/health` returns
+4. Once live, confirm `https://<your-render-app>.onrender.com/health` returns
    `{"status":"ok"}`.
+
+Free-tier services have an ephemeral filesystem (wiped on redeploy/restart, but fine
+during normal uptime) and no persistent disk — the SQLite checkpoint and saved
+`outputs/{session_id}.json` files won't survive a restart. If you need session lookups
+(`GET /session/{id}`) to survive restarts, move to a paid Render plan with a disk mounted
+at `/app/data`, or point `SQLITE_PATH`/`outputs_dir` at external storage.
 
 ### Frontend on Vercel
 
@@ -143,7 +148,7 @@ config.py                 central Settings (env vars)
 schemas.py                shared AgentState + LLM I/O schemas (the cross-file contract)
 taxonomy.py                ~60-skill canonical taxonomy
 llm_client.py              provider-agnostic LLM wrapper (LLM_PROVIDER swap point)
-embeddings.py               skill canonicalization via local embeddings
+embeddings.py               skill canonicalization (exact alias + fuzzy match, stdlib only)
 pdf_parser.py               PDF text extraction + Tesseract OCR fallback
 agent_extractor.py          } 
 agent_role_strategist.py    }
@@ -162,5 +167,11 @@ plan.md                     full design doc
 - Swapping LLM providers is a single env var (`LLM_PROVIDER`) — no code changes.
 - Provider model catalogs change over time; if you see a `model_not_found` error, check
   your provider's current model list and update `*_MODEL` in `.env` accordingly.
-- `data/` (embeddings index, SQLite checkpoints) and `outputs/` (saved sessions) are
-  gitignored and created automatically on first run.
+- `data/` (SQLite checkpoints) and `outputs/` (saved sessions) are gitignored and
+  created automatically on first run.
+- Skill canonicalization (`embeddings.py`) matches against `taxonomy.py`'s aliases
+  exactly, then falls back to fuzzy string matching (`difflib`) — no ML dependency, so
+  it fits a 512MB free hosting tier. It's lexical, not semantic: aliases in
+  `taxonomy.py` cover the common rephrasings (abbreviations, "k8s" vs "Kubernetes");
+  genuinely novel phrasings the alias list doesn't anticipate may fall back to the raw
+  extracted string (`canonical: false` in the Extractor output) instead of matching.

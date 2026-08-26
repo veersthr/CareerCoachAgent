@@ -7,10 +7,7 @@ requests==2.34.2
 groq==1.6.0
 google-generativeai==0.8.3
 
-# Local embeddings + vector search
-sentence-transformers==6.0.0
-chromadb==1.5.9
-faiss-cpu==1.9.0
+# Skill canonicalization (embeddings.py) uses only the stdlib (difflib) — no ML deps here.
 
 # PDF / OCR — Tesseract binary must also be installed separately (e.g. `brew install tesseract`)
 pymupdf==1.28.2

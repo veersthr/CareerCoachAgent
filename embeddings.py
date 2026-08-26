@@ -1,162 +1,68 @@
-"""Local embedding-based skill canonicalization.
+"""Local skill canonicalization — no ML deps, stdlib only.
 
-Builds a local vector index (Chroma or FAISS, per VECTOR_STORE) over
-taxonomy.py's ~60 canonical skills — indexing each skill's name AND each of
-its aliases as its own embedding point (not one combined "name (aliases)"
-string; see taxonomy.all_name_variants for why) — and matches raw JD skill
-strings against it via cosine similarity. Used by agent_extractor.py to
-canonicalize each extracted skill; anything below CANONICALIZATION_THRESHOLD
-falls back to the raw extracted string (see AgentExtractor's `canonical`
-flag on Skill).
+Matches raw JD skill strings against taxonomy.py's ~60 canonical skills in two
+passes:
+  1. Exact match (case-insensitive) against each skill's name/aliases via
+     taxonomy.ALIAS_TO_CANONICAL — covers the common case where the JD uses a
+     known alias verbatim ("k8s", "Postgres", "GCP").
+  2. Fuzzy match (difflib.SequenceMatcher ratio) against every name/alias
+     surface form, for typos/case/punctuation variance the alias list doesn't
+     cover verbatim.
+
+This previously ran on sentence-transformers + chromadb/faiss for semantic
+(not just lexical) matching, at the cost of ~1GB of ML dependencies and RAM
+that don't fit a small hosting instance. Aliases in taxonomy.py already
+absorb most of the semantic-gap cases (abbreviations, common rephrasings);
+what's left is lexical variance, which fuzzy string matching handles well
+enough at a fraction of the footprint.
 """
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 from functools import lru_cache
 
 from config import settings
-from taxonomy import all_name_variants
-
-
-class EmbeddingError(Exception):
-    """Raised when the embedding model or vector backend fails to load/query."""
+from taxonomy import ALIAS_TO_CANONICAL, all_name_variants
 
 
 @lru_cache(maxsize=1)
-def _get_model():
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise EmbeddingError(
-            "sentence-transformers is not installed. Run: pip install sentence-transformers"
-        ) from exc
-    return SentenceTransformer(settings.embedding_model)
+def _variants() -> list[tuple[str, str]]:
+    """[(canonical_name, lowercased surface_form), ...]"""
+    return [(name, surface.lower()) for name, surface in all_name_variants()]
 
 
-def _best_per_canonical_name(matches: list[tuple[str, float]]) -> tuple[str, float] | None:
-    """Multiple index rows (name + aliases) map to the same canonical name;
-    collapse raw top-k matches down to the single best score per name."""
-    best: dict[str, float] = {}
-    for name, score in matches:
-        if score > best.get(name, -1.0):
-            best[name] = score
-    if not best:
+def _fuzzy_best_match(raw_lower: str) -> tuple[str, float] | None:
+    best_name: str | None = None
+    best_score = -1.0
+    for canonical_name, surface in _variants():
+        score = SequenceMatcher(None, raw_lower, surface).ratio()
+        if score > best_score:
+            best_name, best_score = canonical_name, score
+    if best_name is None:
         return None
-    return max(best.items(), key=lambda kv: kv[1])
-
-
-class _FaissIndex:
-    def __init__(self, canonical_names: list[str], vectors) -> None:
-        try:
-            import faiss
-        except ImportError as exc:
-            raise EmbeddingError("faiss-cpu is not installed. Run: pip install faiss-cpu") from exc
-        import numpy as np
-
-        self._faiss = faiss
-        self._np = np
-        self._canonical_names = canonical_names  # index i -> canonical name (may repeat)
-        vecs = np.array(vectors, dtype="float32")
-        faiss.normalize_L2(vecs)
-        self._index = faiss.IndexFlatIP(vecs.shape[1])
-        self._index.add(vecs)
-
-    def best_match(self, vector, candidate_pool: int = 10) -> tuple[str, float] | None:
-        vec = self._np.array([vector], dtype="float32")
-        self._faiss.normalize_L2(vec)
-        k = min(candidate_pool, self._index.ntotal)
-        scores, idxs = self._index.search(vec, k)
-        raw_matches = [
-            (self._canonical_names[i], float(scores[0][rank]))
-            for rank, i in enumerate(idxs[0])
-            if i != -1
-        ]
-        return _best_per_canonical_name(raw_matches)
-
-
-class _ChromaIndex:
-    COLLECTION_NAME = "skill_taxonomy"
-
-    def __init__(self, canonical_names: list[str], variant_texts: list[str], vectors) -> None:
-        try:
-            import chromadb
-        except ImportError as exc:
-            raise EmbeddingError("chromadb is not installed. Run: pip install chromadb") from exc
-
-        client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-        self._collection = client.get_or_create_collection(
-            self.COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
-        )
-        if self._collection.count() != len(canonical_names):
-            # fresh collection, or taxonomy.py's variant count changed since last persisted run
-            ids = [f"{name}::{i}" for i, name in enumerate(canonical_names)]
-            self._collection.upsert(
-                ids=ids,
-                embeddings=[[float(x) for x in v] for v in vectors],
-                metadatas=[
-                    {"name": name, "surface_form": text}
-                    for name, text in zip(canonical_names, variant_texts)
-                ],
-                documents=variant_texts,
-            )
-
-    def best_match(self, vector, candidate_pool: int = 10) -> tuple[str, float] | None:
-        res = self._collection.query(
-            query_embeddings=[[float(x) for x in vector]], n_results=candidate_pool
-        )
-        metadatas = res["metadatas"][0]
-        distances = res["distances"][0]  # cosine distance = 1 - cosine similarity
-        raw_matches = [(meta["name"], 1.0 - dist) for meta, dist in zip(metadatas, distances)]
-        return _best_per_canonical_name(raw_matches)
-
-
-@lru_cache(maxsize=1)
-def _get_index():
-    model = _get_model()
-    variant_pairs = all_name_variants()  # [(canonical_name, surface_form), ...]
-    canonical_names = [n for n, _ in variant_pairs]
-    surface_forms = [t for _, t in variant_pairs]
-    vectors = model.encode(surface_forms, normalize_embeddings=False)
-
-    if settings.vector_store == "faiss":
-        return _FaissIndex(canonical_names, vectors)
-    if settings.vector_store == "chroma":
-        return _ChromaIndex(canonical_names, surface_forms, vectors)
-    raise EmbeddingError(f"Unknown VECTOR_STORE '{settings.vector_store}'. Must be 'chroma' or 'faiss'.")
+    return best_name, best_score
 
 
 def canonicalize_skill(raw_name: str) -> tuple[str, bool]:
     """Matches `raw_name` against the skill taxonomy.
 
     Returns (name, is_canonical):
-      - (canonical taxonomy name, True) if the best match's cosine similarity
-        is >= settings.canonicalization_threshold
+      - (canonical taxonomy name, True) on an exact alias match, or a fuzzy
+        match scoring >= settings.canonicalization_threshold
       - (raw_name, False) otherwise — the Extractor keeps the raw string
     """
-    model = _get_model()
-    index = _get_index()
-    vector = model.encode([raw_name], normalize_embeddings=False)[0]
-    match = index.best_match(vector)
-    if match is None:
-        return raw_name, False
-    best_name, best_score = match
-    if best_score >= settings.canonicalization_threshold:
-        return best_name, True
+    raw_lower = raw_name.strip().lower()
+    exact = ALIAS_TO_CANONICAL.get(raw_lower)
+    if exact is not None:
+        return exact, True
+
+    match = _fuzzy_best_match(raw_lower)
+    if match is not None and match[1] >= settings.canonicalization_threshold:
+        return match[0], True
     return raw_name, False
 
 
 def canonicalize_skills(raw_names: list[str]) -> list[tuple[str, bool]]:
-    """Batch version of canonicalize_skill — embeds all raw names in one call."""
-    if not raw_names:
-        return []
-    model = _get_model()
-    index = _get_index()
-    vectors = model.encode(raw_names, normalize_embeddings=False)
-    results = []
-    for raw_name, vector in zip(raw_names, vectors):
-        match = index.best_match(vector)
-        if match is not None and match[1] >= settings.canonicalization_threshold:
-            results.append((match[0], True))
-        else:
-            results.append((raw_name, False))
-    return results
+    """Batch version of canonicalize_skill."""
+    return [canonicalize_skill(name) for name in raw_names]

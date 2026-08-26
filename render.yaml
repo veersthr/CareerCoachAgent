@@ -4,12 +4,8 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: standard # sentence-transformers + chromadb need more than the 512MB free tier
+    plan: free # skill canonicalization is now stdlib-only (no sentence-transformers/chromadb), so this fits free tier's 512MB
     healthCheckPath: /health
-    disk:
-      name: career-coach-data
-      mountPath: /app/data
-      sizeGB: 1
     envVars:
       - key: LLM_PROVIDER
         value: groq
