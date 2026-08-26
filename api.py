@@ -23,8 +23,10 @@ app = FastAPI(title="AI Career Coach", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # React dev server; tighten to a specific origin in production
-    allow_credentials=True,
+    # Set via ALLOWED_ORIGINS env var, e.g. "https://my-app.vercel.app". Defaults to "*"
+    # for local dev. No credentials (cookies) are used, so a wildcard origin is safe.
+    allow_origins=settings.allowed_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

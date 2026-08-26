@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: career-coach-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: standard # sentence-transformers + chromadb need more than the 512MB free tier
+    healthCheckPath: /health
+    disk:
+      name: career-coach-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: ALLOWED_ORIGINS
+        sync: false # set to your Vercel frontend URL, e.g. https://my-app.vercel.app

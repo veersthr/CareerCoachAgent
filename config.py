@@ -71,6 +71,13 @@ class Settings:
     # --- API ---
     api_host: str = field(default_factory=lambda: os.getenv("API_HOST", "0.0.0.0"))
     api_port: int = field(default_factory=lambda: int(os.getenv("API_PORT", "8000")))
+    # Comma-separated list of allowed frontend origins, e.g. "https://my-app.vercel.app".
+    # Defaults to "*" for local development.
+    allowed_origins: list = field(
+        default_factory=lambda: [
+            o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()
+        ]
+    )
 
     debug: bool = field(default_factory=lambda: _get_bool("DEBUG", False))
 

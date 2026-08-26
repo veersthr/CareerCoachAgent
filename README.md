@@ -97,6 +97,45 @@ Open the printed URL (default `http://localhost:5173`). Paste a job description 
 upload a PDF, then review the generated roadmap across the Report / Timeline / Agent
 Logs / Gantt tabs.
 
+## Deploying (Vercel frontend + Render backend)
+
+The backend uses heavy local ML deps (`sentence-transformers`, `chromadb`, `faiss-cpu`),
+a local SQLite checkpoint file, and optionally the Tesseract binary — none of which fit
+Vercel's serverless model. Split the deploy instead: frontend on Vercel (static site),
+backend on Render (a real long-running container with a persistent disk).
+
+### Backend on Render
+
+1. Push this repo to GitHub (already done if you're reading this from the repo).
+2. In the Render dashboard: **New > Blueprint**, point it at this repo. Render reads
+   [`render.yaml`](render.yaml) and creates a Docker-based web service that installs
+   Tesseract, mounts a 1GB persistent disk at `/app/data` (so the Chroma index and
+   SQLite checkpoints survive restarts), and health-checks `/health`.
+   - Alternatively, without the blueprint: **New > Web Service**, runtime **Docker**,
+     it'll pick up the repo's [`Dockerfile`](Dockerfile) automatically.
+3. Set the env vars Render prompts for (marked `sync: false` in `render.yaml`):
+   - `GROQ_API_KEY` (or switch `LLM_PROVIDER`/keys to Gemini instead)
+   - `ALLOWED_ORIGINS` — leave blank until you have the Vercel URL from the next step,
+     then come back and set it to `https://<your-vercel-app>.vercel.app` (comma-separate
+     multiple origins if needed) and redeploy.
+4. Pick at least the **Standard** plan (or similar ≥2GB RAM) — `sentence-transformers`
+   + `chromadb` won't run reliably on a 512MB free instance.
+5. Once live, confirm `https://<your-render-app>.onrender.com/health` returns
+   `{"status":"ok"}`.
+
+### Frontend on Vercel
+
+1. In the Vercel dashboard: **Add New > Project**, import this repo.
+2. Set **Root Directory** to `frontend` (this is a monorepo — the frontend isn't at the
+   repo root). Vercel auto-detects the Vite framework preset from there.
+3. Add an environment variable `VITE_API_BASE_URL` = `https://<your-render-app>.onrender.com`.
+4. Deploy. Then go back to Render and set `ALLOWED_ORIGINS` to the resulting Vercel URL
+   (step 3 above) so CORS allows it.
+
+Render's free-tier instances spin down when idle and take ~30-60s to wake on the next
+request — the frontend's staged loader will just sit on the first stage a while longer
+on a cold start; that's expected, not a bug.
+
 ## Project structure
 
 ```
