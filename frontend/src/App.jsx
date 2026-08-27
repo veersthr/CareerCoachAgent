@@ -12,8 +12,8 @@ export default function App() {
         <div className="app__eyebrow-row">
           <svg
             className="app__logo-icon"
-            width="19"
-            height="19"
+            width="28"
+            height="28"
             viewBox="0 0 20 20"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
